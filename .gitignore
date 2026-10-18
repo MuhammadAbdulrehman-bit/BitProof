@@ -1,2 +1,9 @@
 tenders/
 .venv/
+# Candidate CSVs are regenerable from PDFs + parser v1.0. Commit only labels.
+data/*_candidates.csv
+# Do not commit the sample PDF either — regenerate with scripts/generate_sample_rfp.py
+data/sample_rfp.pdf
+__pycache__/
+*.pyc
+*.pyo

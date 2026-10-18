@@ -8,6 +8,7 @@ Golden rule: **if a bidder could lose marks, be disqualified, or be in breach of
 
 One row per requirement.
 - Usually one sentence. If a requirement spans two sentences, make one row and join the text.
+- A numbered clause or bullet is its own row, and an intro line counts if it carries a requirement or a consequence.
 - A table line item that specifies something the vendor must supply = one row. Ignore pricing columns.
 - Several separate obligations in one sentence ("shall do A and shall do B") stay one row unless the types differ.
 
