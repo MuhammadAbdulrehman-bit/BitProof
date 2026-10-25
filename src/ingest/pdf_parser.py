@@ -456,3 +456,72 @@ class PDFSentenceParser:
             for s in sentences:
                 writer.writerow(s)
         print(f"Saved {len(sentences)} candidates to {output_path}")
+
+    def parse(self, pdf_path: str, tender_id: str, use_llm_assist: bool = False) -> Dict[str, Any]:
+        """
+        Convenience wrapper returning structured dict with 'candidates', 'pdf_sha256', 'meta'.
+        Enables seamless integration with Streamlit and automated pipelines.
+        """
+        sentences, meta = self.parse_pdf(pdf_path, tender_id)
+        if use_llm_assist:
+            sentences = self.refine_segmentation_with_llm(sentences)
+            meta["total_candidates"] = len(sentences)
+        return {
+            "candidates": sentences,
+            "pdf_sha256": meta["pdf_sha256"],
+            "meta": meta
+        }
+
+    def refine_segmentation_with_llm(
+        self,
+        sentences: List[Dict[str, Any]],
+        extractor: Optional[Any] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        LLM Parser Assistant (Nemotron-Powered Segmentation Safeguard):
+        Inspects complex or long sentences (>250 chars or containing multiple semicolons/clauses)
+        where standard deterministic splitting might have merged multiple distinct requirements.
+        Splits them into deterministic sub-IDs (_s001a, _s001b) ensuring NO requirement is swallowed.
+        """
+        if extractor is None:
+            try:
+                from src.extractors.llm_extractor import LLMExtractor
+                extractor = LLMExtractor()
+            except Exception:
+                return sentences
+
+        refined = []
+        for s in sentences:
+            text = s["text"]
+            # Trigger LLM segmentation only for long, complex sentences with multiple clauses
+            if len(text) > 250 and (";" in text or " and " in text or ":" in text):
+                prompt = (
+                    "Split the following government RFP text into distinct, standalone contractual clauses or requirements. "
+                    "If it is already a single requirement, return a list with just that one string. "
+                    "Return a JSON object: {\"clauses\": [\"clause 1\", \"clause 2\"]}\n\n"
+                    f"TEXT: {text}"
+                )
+                try:
+                    resp = extractor.client.chat.completions.create(
+                        model=extractor.model,
+                        messages=[{"role": "user", "content": prompt}],
+                        response_format={"type": "json_object"},
+                        max_tokens=600,
+                        temperature=0.0
+                    )
+                    content = resp.choices[0].message.content or "{}"
+                    data = json.loads(content)
+                    clauses = data.get("clauses", [text])
+                    if len(clauses) > 1:
+                        suffixes = "abcdefghijklmnopqrstuvwxyz"
+                        for idx, c in enumerate(clauses):
+                            s_copy = dict(s)
+                            sub_suffix = suffixes[idx] if idx < len(suffixes) else f"_{idx}"
+                            s_copy["sentence_id"] = f"{s['sentence_id']}{sub_suffix}"
+                            s_copy["text"] = c.strip()
+                            refined.append(s_copy)
+                        continue
+                except Exception as e:
+                    print(f"LLM segmentation fallback: {e}")
+            refined.append(s)
+        return refined

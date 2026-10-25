@@ -197,3 +197,102 @@ class CoverageLedger:
             )
 
         return stats
+
+    def reconcile_and_adjudicate(
+        self,
+        tender_id: str,
+        candidates: List[Dict[str, Any]],
+        regex_results: Dict[str, Dict[str, Any]],
+        llm_results: Dict[str, Dict[str, Any]],
+        extractor: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Dual-Stream Reconciliation & Adjudication Pipeline:
+        Compares Regex and LLM determinations for every sentence ID.
+        - Agreement -> auto-accepted into ledger.
+        - Disagreement or Unlabeled -> routed to LLM Adjudicator (Nemotron Ultra/Reasoning).
+        Enforces 100% sentence coverage so NO sentence slips through without an ID and label.
+        """
+        disagreements = []
+        ledger_items = []
+
+        for c in candidates:
+            sid = c["sentence_id"]
+            page = int(c.get("page") or c.get("start_page") or 1)
+            section = c.get("section", "GENERAL")
+            text = c["text"]
+
+            reg = regex_results.get(sid, {})
+            llm = llm_results.get(sid, {})
+
+            reg_req = bool(reg.get("is_requirement", False))
+            llm_req = bool(llm.get("is_requirement", False))
+
+            # Case 1: Agreement
+            if reg_req == llm_req:
+                classification = "requirement" if reg_req else "background"
+                req_type = llm.get("type") or reg.get("matched_type") or ("technical" if reg_req else None)
+                mandatory = llm.get("mandatory") or ("yes" if reg_req else None)
+                knockout = "yes" if (llm.get("knockout") == "yes" or reg.get("knockout") == "yes") else "no"
+
+                ledger_items.append({
+                    "sentence_id": sid,
+                    "tender_id": tender_id,
+                    "page": page,
+                    "section": section,
+                    "text": text,
+                    "classification": classification,
+                    "req_type": req_type,
+                    "mandatory": mandatory,
+                    "knockout": knockout,
+                    "knockout_type": llm.get("knockout_type") or reg.get("knockout_type"),
+                    "confidence": 0.95,
+                    "source": "regex+llm_consensus",
+                    "notes": llm.get("notes") or reg.get("notes", "")
+                })
+
+            # Case 2: Disagreement (Heuristic vs LLM conflict)
+            else:
+                disagreements.append(c)
+                if extractor:
+                    # Resolve with Nemotron Adjudicator
+                    adj = extractor.adjudicate_disagreement(sid, text, reg, llm)
+                    ledger_items.append({
+                        "sentence_id": sid,
+                        "tender_id": tender_id,
+                        "page": page,
+                        "section": section,
+                        "text": text,
+                        "classification": adj.get("final_classification", "requirement"),
+                        "req_type": adj.get("type", "technical"),
+                        "mandatory": adj.get("mandatory", "yes"),
+                        "knockout": adj.get("knockout", "no"),
+                        "knockout_type": adj.get("knockout_type"),
+                        "confidence": adj.get("confidence", 0.90),
+                        "source": "adjudicated_nemotron",
+                        "notes": adj.get("adjudication_rationale", "Resolved conflict between regex and fast LLM")
+                    })
+                else:
+                    # Conservative fallback: treat as requirement so nothing is dropped
+                    ledger_items.append({
+                        "sentence_id": sid,
+                        "tender_id": tender_id,
+                        "page": page,
+                        "section": section,
+                        "text": text,
+                        "classification": "requirement",
+                        "req_type": "compliance",
+                        "mandatory": "yes",
+                        "knockout": "no",
+                        "confidence": 0.60,
+                        "source": "disagreement_fallback",
+                        "notes": "Regex and LLM disagreed; defaulted to requirement"
+                    })
+
+        # Save all reconciled rows
+        self.record_batch(ledger_items)
+
+        # Enforce 100% Coverage Gate
+        stats = self.verify_coverage_gate(tender_id)
+        stats["disagreements_resolved"] = len(disagreements)
+        return stats
