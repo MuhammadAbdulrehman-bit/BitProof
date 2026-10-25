@@ -1,0 +1,51 @@
+[
+  {
+    "exact_quote": "QUOTATION REQUIRED PAKISTAN ON 21.10.2026 BY (Date) (Time)",
+    "type": "submission",
+    "mandatory": "yes",
+    "knockout": "yes",
+    "summary": "The quotation must be submitted by the specified date and time."
+  },
+  {
+    "exact_quote": "EARNEST MONEY % ... Rs.______________PO/DDNO.______________",
+    "type": "commercial",
+    "mandatory": "yes",
+    "knockout": "yes",
+    "summary": "The bidder must provide the Earnest Money amount and PO/DD number as required by the form."
+  },
+  {
+    "exact_quote": "Installation,commissioning,andconfigurationofModbus Repeatersisneededfor13Tankswhichareconnectedin03loopsasfollowsKTA RTGCommunicationLoops: Loop01:TK-413 Loop02:TK-401,402,403,407,408,409,412 Loop03:TK-428,430,431,432,438",
+    "type": "technical",
+    "mandatory": "yes",
+    "knockout": "yes",
+    "summary": "The vendor must install, commission, and configure Modbus Repeaters for the specified 13 tanks across three defined loops."
+  },
+  {
+    "exact_quote": "Thevendorwillexplorepossibilityforinstallationofonlyone boosterfortanksinloop01andloop02.Onlyincasethiswasnotviable,two boostersfortwoloopsforKTAGasolinewillbeinstalled.TheLoop03 isinKTAKerosene.",
+    "type": "technical",
+    "mandatory": "yes",
+    "knockout": "no",
+    "summary": "The vendor must evaluate the feasibility of using a single booster for Loops 01 and 02, installing two if not viable, with Loop 03 separate."
+  },
+  {
+    "exact_quote": "Thejobincludesallnecessaryworkrequiredforinstallation, commissioningandconfigurationofthesetanksandloopswithE<(>&<)>H CentralizationSystemcompleteinallaspects.",
+    "type": "technical",
+    "mandatory": "yes",
+    "knockout": "yes",
+    "summary": "The scope includes all work necessary to integrate the tanks and loops with the E&H Centralization System."
+  },
+  {
+    "exact_quote": "Allofthetanksmustprovidecontinuousdatawithoutanydistortionsanddataswapping.",
+    "type": "technical",
+    "mandatory": "yes",
+    "knockout": "yes",
+    "summary": "The system must ensure continuous data transmission from all tanks without distortion or data swapping."
+  },
+  {
+    "exact_quote": "Vendorwillgive01-yearfreeofcostsupportafterinstallationand commissionofthesystemandresolveissueswhentheyarise.",
+    "type": "commercial",
+    "mandatory": "yes",
+    "knockout": "no",
+    "summary": "The vendor must provide one year of free support and issue resolution after installation and commissioning."
+  }
+]
