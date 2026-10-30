@@ -7,3 +7,6 @@ data/sample_rfp.pdf
 __pycache__/
 *.pyc
 *.pyo
+
+.env
+*.db
