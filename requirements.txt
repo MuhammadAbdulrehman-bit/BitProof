@@ -5,10 +5,11 @@ cryptography==50.0.2
 idna==3.20
 pdfminer.six==20260107
 pdfplumber==0.11.10
-pillow==13.0.0
+pillow==12.3.0
 pycparser==3.11
 pypdf==6.21.1
 pypdfium2==5.14.0
 reportlab==5.0.1
 requests==2.34.2
 urllib3==2.8.0
+streamlit

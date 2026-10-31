@@ -26,13 +26,15 @@ class CoverageLedger:
         else:
             self.db_path = os.path.abspath(db_path)
             os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-            self._mem_conn = None
+            self._mem_conn = sqlite3.connect(":memory:", check_same_thread=False)
         self._init_db()
 
     def _get_connection(self):
         if self.is_memory:
             return self._mem_conn
-        return sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
 
     def _init_db(self):
         with self._get_connection() as conn:

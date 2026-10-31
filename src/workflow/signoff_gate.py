@@ -2,17 +2,21 @@ import os
 import hashlib
 import json
 import sqlite3
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
+
 
 class SignoffGateBlockedError(Exception):
     """Raised when PDF export or proposal generation is attempted without a valid human sign-off."""
     pass
 
+
 class ComplianceMatrixManager:
     """
     Manages the Bidder Compliance Matrix and enforces the Named-Approver Human Sign-Off Gate.
-    
+
     Hard Rules:
     1. Every requirement from the Coverage Ledger must be evaluated (Compliant, Partial, Non-Compliant).
     2. Any knockout clause with Non-Compliant status triggers a HIGH risk warning.
@@ -23,9 +27,13 @@ class ComplianceMatrixManager:
 
     def __init__(self, db_path: str = "data/compliance_matrix.db"):
         self.is_memory = (db_path == ":memory:")
+        self._lock = threading.RLock()
         if self.is_memory:
             self.db_path = ":memory:"
-            self._mem_conn = sqlite3.connect(":memory:")
+            # check_same_thread=False lets Streamlit's different worker threads
+            # share this connection; self._lock serializes access to it.
+            self._mem_conn = sqlite3.connect(":memory:", check_same_thread=False)
+            self._mem_conn.row_factory = sqlite3.Row
         else:
             self.db_path = os.path.abspath(db_path)
             os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
@@ -33,12 +41,44 @@ class ComplianceMatrixManager:
         self._init_db()
 
     def _get_connection(self):
+        """Kept for backward compatibility. Prefer self._connect()."""
         if self.is_memory:
             return self._mem_conn
-        return sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    @contextmanager
+    def _connect(self):
+        """
+        Thread-safe connection context manager.
+        - In-memory: reuses the shared connection under a lock (never closed).
+        - File DB: opens a fresh connection in the current thread and closes it afterwards.
+        Commits on success, rolls back on error.
+        """
+        if self.is_memory:
+            with self._lock:
+                conn = self._mem_conn
+                try:
+                    yield conn
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+        else:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                yield conn
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
 
     def _init_db(self):
-        with self._get_connection() as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS compliance_items (
@@ -72,7 +112,6 @@ class ComplianceMatrixManager:
                     comments TEXT
                 )
             """)
-            conn.commit()
 
     def calculate_matrix_hash(self, tender_id: str) -> str:
         """Computes deterministic SHA-256 hash of all compliance items for a tender."""
@@ -105,7 +144,7 @@ class ComplianceMatrixManager:
         """Save or update an individual compliance matrix row."""
         if evidence_tags is None:
             evidence_tags = []
-        
+
         # Calculate risk automatically if not explicitly given
         if not risk_level:
             if knockout.lower() == "yes" and compliance_status.upper() != "COMPLIANT":
@@ -120,7 +159,7 @@ class ComplianceMatrixManager:
         now = datetime.now(timezone.utc).isoformat()
         tags_json = json.dumps(evidence_tags)
 
-        with self._get_connection() as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO compliance_items (
@@ -145,25 +184,23 @@ class ComplianceMatrixManager:
                 req_type, mandatory, knockout, compliance_status.upper(),
                 vendor_response, tags_json, risk_level.upper(), now
             ))
-            conn.commit()
 
     def get_matrix(self, tender_id: str) -> List[Dict[str, Any]]:
         """Fetch full compliance matrix for a tender."""
-        with self._get_connection() as conn:
-            conn.row_factory = sqlite3.Row
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT * FROM compliance_items WHERE tender_id = ? ORDER BY id ASC",
                 (tender_id,)
             )
             rows = [dict(r) for r in cursor.fetchall()]
-            for r in rows:
-                if isinstance(r.get("evidence_tags"), str):
-                    try:
-                        r["evidence_tags"] = json.loads(r["evidence_tags"])
-                    except Exception:
-                        r["evidence_tags"] = []
-            return rows
+        for r in rows:
+            if isinstance(r.get("evidence_tags"), str):
+                try:
+                    r["evidence_tags"] = json.loads(r["evidence_tags"])
+                except Exception:
+                    r["evidence_tags"] = []
+        return rows
 
     def record_signoff(
         self,
@@ -182,7 +219,7 @@ class ComplianceMatrixManager:
             raise ValueError(f"Cannot sign off: No compliance matrix items exist for tender '{tender_id}'.")
 
         now = datetime.now(timezone.utc).isoformat()
-        with self._get_connection() as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO signoff_records (
@@ -201,7 +238,6 @@ class ComplianceMatrixManager:
                 tender_id, matrix_hash, approver_name, approver_role,
                 approver_email, now, status.upper(), comments
             ))
-            conn.commit()
 
         return {
             "tender_id": tender_id,
@@ -214,8 +250,7 @@ class ComplianceMatrixManager:
 
     def get_signoff(self, tender_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve existing sign-off record for tender."""
-        with self._get_connection() as conn:
-            conn.row_factory = sqlite3.Row
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM signoff_records WHERE tender_id = ?", (tender_id,))
             row = cursor.fetchone()
@@ -227,7 +262,7 @@ class ComplianceMatrixManager:
         Guarantees that no proposal PDF can be exported unless:
         1. A named approver has explicitly approved the matrix.
         2. The matrix has not been modified since the signature was placed.
-        
+
         Raises SignoffGateBlockedError if unauthorized.
         """
         signoff = self.get_signoff(tender_id)
